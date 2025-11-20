@@ -31,6 +31,13 @@ export const getProductRepo = (): ProductRepo => {
         description: 'Another seeded product to get you started.',
         updatedAt: now,
       },
+      {
+        id: 'p-004',
+        name: 'Seeded ipad',
+        pricePence: 4599,
+        description: 'Another seeded product to get you started.',
+        updatedAt: now,
+      },
     ];
     cachedProductRepo = new FakeProductRepo(initialProducts);
   }
