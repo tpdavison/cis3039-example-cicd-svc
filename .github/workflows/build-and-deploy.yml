@@ -1,0 +1,79 @@
+name: Build and Deploy to Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (into ./dist)
+        run: npm run build
+
+      - name: Assemble Function App package
+        run: |
+          # make an empty package folder
+          rm -rf package
+          mkdir package
+
+          # copy root metadata
+          cp host.json package/
+          cp package.json package/
+          cp package-lock.json package/
+
+          # copy compiled JS
+          cp -r dist package/dist
+
+          # install runtime dependencies only (no devDeps) into the package
+          npm ci --omit=dev --prefix package
+
+      - name: Save Function App package
+        uses: actions/upload-artifact@v7
+        with:
+          name: functionapp-package
+          path: package
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy-to-test:
+    needs: build-and-package
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Function App package
+        uses: actions/download-artifact@v8
+        with:
+          name: functionapp-package
+          path: package
+
+      - name: Deploy to Azure Function App
+        uses: Azure/functions-action@v1
+        with:
+          # Set this repository variable to the existing Test Function App name.
+          app-name: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+          package: package
+          # Store the complete publishing profile XML in this repository secret.
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
