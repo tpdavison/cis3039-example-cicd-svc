@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: 'Upload Function App package'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,3 +35,30 @@ jobs:
 
       - name: Build (into ./dist)
         run: npm run build
+
+      - name: Assemble Function App package
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_artifact
+        run: |
+          # make an empty package folder
+          rm -rf package
+          mkdir package
+
+          # copy root metadata
+          cp host.json package/
+          cp package.json package/
+          cp package-lock.json package/
+
+          # copy compiled JS
+          cp -r dist package/dist
+
+          # install runtime dependencies only (no devDeps) into the package
+          npm ci --omit=dev --prefix package
+
+      - name: Save Function App package
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: functionapp-package
+          path: package
+          if-no-files-found: error
+          retention-days: 1

@@ -1,6 +1,6 @@
 # Product service — CI example
 
-A TypeScript Product API built with Azure Functions and a build-only GitHub Actions workflow. The service demonstrates application layers, input validation, dependency injection and continuous integration using a small in-memory data store.
+A TypeScript Product API built with Azure Functions and a build-only GitHub Actions workflow with optional publishable package upload. The service demonstrates application layers, input validation, dependency injection and continuous integration using a small in-memory data store.
 
 ## Development environment
 
@@ -54,12 +54,12 @@ See Microsoft's [Azurite documentation](https://learn.microsoft.com/en-us/azure/
 
 All endpoints use anonymous access: a Function key or sign-in is not required. This is a demonstration service with synthetic data and an in-memory repository.
 
-| Method | Path | Successful response |
-| --- | --- | --- |
-| `GET` | `/api/health/live` | HTTP 200 with `{"status":"live"}` |
-| `GET` | `/api/products` | HTTP 200 with an array of products |
-| `POST` | `/api/products` | HTTP 200 with the created or updated product |
-| `PUT` | `/api/products` | HTTP 200 with the created or updated product |
+| Method | Path               | Successful response                          |
+| ------ | ------------------ | -------------------------------------------- |
+| `GET`  | `/api/health/live` | HTTP 200 with `{"status":"live"}`            |
+| `GET`  | `/api/products`    | HTTP 200 with an array of products           |
+| `POST` | `/api/products`    | HTTP 200 with the created or updated product |
+| `PUT`  | `/api/products`    | HTTP 200 with the created or updated product |
 
 Both write methods upsert a complete product: an existing ID is replaced, and a new ID is added. They use the ID in the JSON body, rather than an ID in the URL.
 
@@ -93,12 +93,12 @@ Expect HTTP 200 with the saved product. Repeat the list request to see `product-
 
 The JSON body must contain:
 
-| Field | Requirement |
-| --- | --- |
-| `id` | A string containing at least one non-whitespace character |
-| `name` | A string containing at least one non-whitespace character |
-| `pricePence` | A non-negative safe integer, representing the price in pence |
-| `description` | A string containing at least one non-whitespace character |
+| Field         | Requirement                                                  |
+| ------------- | ------------------------------------------------------------ |
+| `id`          | A string containing at least one non-whitespace character    |
+| `name`        | A string containing at least one non-whitespace character    |
+| `pricePence`  | A non-negative safe integer, representing the price in pence |
+| `description` | A string containing at least one non-whitespace character    |
 
 The application supplies `updatedAt` when saving; clients do not need to send it. Malformed JSON, missing fields, incorrect types and invalid values return HTTP 400. Unexpected server failures return HTTP 500 with a generic message rather than internal exception details.
 
@@ -126,7 +126,7 @@ The [Build workflow](.github/workflows/build.yml) runs on:
 
 Its single job runs on `ubuntu-latest`, checks out the code, selects Node.js 22 with npm caching, installs dependencies using `npm ci`, and runs `npm run build`. Repository permissions are limited to `contents: read`.
 
-The build compiles the TypeScript into `dist` with strict type checking. A compilation error fails the job. This is build validation; it does not demonstrate that the application's behaviour is correct. The workflow has no deployment steps, uploaded artefacts or Azure credential requirements.
+The build compiles the TypeScript into `dist` with strict type checking. A compilation error fails the job. This is build validation; it does not demonstrate that the application's behaviour is correct. The workflow has no deployment steps or Azure credential requirements.
 
 Ensure GitHub Actions is enabled in your repository. After pushing a commit to `main`, open the repository's **Actions** tab, select **Build**, and inspect the job and step logs. A local check using the same commands is:
 
@@ -135,28 +135,57 @@ npm ci
 npm run build
 ```
 
+### Optional Function App package
+
+The manual trigger accepts a boolean input, `upload_artifact`, labelled **Upload Function App package**, which defaults to `false`. Set it to `true` to assemble and upload a publishable Azure Functions package after a successful build. Push and pull-request runs only build; manual runs with the input left off also only build. A failed build prevents packaging and upload, and a packaging failure prevents upload.
+
+To request an upload, open **Actions → Build → Run workflow**, select a branch containing this workflow version, enable **Upload Function App package**, and start the run. GitHub requires the workflow to exist on the repository's default branch for [manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow) to be available.
+
+The packaging step creates a fresh `package` directory with this layout:
+
+```text
+package/
+  host.json
+  package.json
+  package-lock.json
+  dist/
+    src/
+      functions/
+        health-live-http.js
+        list-products-http.js
+        upsert-product-http.js
+      ...
+  node_modules/
+```
+
+It copies the host configuration, package metadata and complete compiled `dist` tree, then runs `npm ci --omit=dev --prefix package` to install the locked runtime dependencies. Development tools such as TypeScript and `rimraf` are excluded from the installed dependencies. Local settings and credentials are not copied.
+
+After the run succeeds, open its summary and download `functionapp-package` from the **Artifacts** section. The archive contains the contents of `package`, with `host.json` at its root. It is retained for one day. A requested upload fails if no package files are found.
+
+This artefact contains the application code and runtime dependencies for deployment to an appropriately configured Azure Function App. Producing the package does not provision infrastructure or deploy the service; this workflow only builds, packages and uploads it.
+
 ## npm commands
 
-| Command | Purpose |
-| --- | --- |
-| `npm run typecheck` | Check TypeScript without emitting JavaScript |
-| `npm run build` | Compile TypeScript into `dist` |
-| `npm run watch` | Recompile when TypeScript files change |
-| `npm run clean` | Remove `dist` |
-| `npm start` | Clean, build and start the local Functions host |
-| `npm test` | Print that no automated tests are configured and exit with status 1 |
+| Command             | Purpose                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `npm run typecheck` | Check TypeScript without emitting JavaScript                        |
+| `npm run build`     | Compile TypeScript into `dist`                                      |
+| `npm run watch`     | Recompile when TypeScript files change                              |
+| `npm run clean`     | Remove `dist`                                                       |
+| `npm start`         | Clean, build and start the local Functions host                     |
+| `npm test`          | Print that no automated tests are configured and exit with status 1 |
 
 There is no automated test suite in this example. The HTTP requests above provide manual checks.
 
 ## Source structure
 
-| Directory | Responsibility |
-| --- | --- |
-| `src/domain` | Product model, validation and repository interface |
-| `src/app` | List and upsert use cases, with typed results and injected dependencies |
-| `src/infra` | Fake in-memory Product repository |
-| `src/config` | Composition root supplying the repository and application clock |
+| Directory       | Responsibility                                                             |
+| --------------- | -------------------------------------------------------------------------- |
+| `src/domain`    | Product model, validation and repository interface                         |
+| `src/app`       | List and upsert use cases, with typed results and injected dependencies    |
+| `src/infra`     | Fake in-memory Product repository                                          |
+| `src/config`    | Composition root supplying the repository and application clock            |
 | `src/functions` | HTTP triggers, request parsing, response mapping and safe error boundaries |
-| `samples` | Valid and invalid product request bodies |
+| `samples`       | Valid and invalid product request bodies                                   |
 
 Generated output in `dist`, installed dependencies in `node_modules`, and `local.settings.json` are ignored by Git. Application configuration templates and the dependency lockfile are committed so a new clone can reproduce the setup.
